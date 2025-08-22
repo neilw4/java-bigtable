@@ -47,6 +47,12 @@ public abstract class BigtableChannelPoolSettings {
   /** The maximum number of channels that can be added or removed at a time. */
   static final int MAX_RESIZE_DELTA = 2;
 
+  /** Enum to define the load balancing strategy. */
+  public enum LoadBalancingStrategy {
+    ROUND_ROBIN,
+    LEAST_LOADED_OF_TWO
+  }
+
   /**
    * Threshold to start scaling down the channel pool.
    *
@@ -95,6 +101,9 @@ public abstract class BigtableChannelPoolSettings {
    */
   public abstract boolean isPreemptiveRefreshEnabled();
 
+  /** The load balancing strategy to use for distributing RPCs across channels. */
+  public abstract LoadBalancingStrategy getLoadBalancingStrategy();
+
   /**
    * Helper to check if the {@link BigtableChannelPool} implementation can skip dynamic size logic
    */
@@ -121,6 +130,7 @@ public abstract class BigtableChannelPoolSettings {
         .setMaxChannelCount(externalSettings.getMaxChannelCount())
         .setInitialChannelCount(externalSettings.getInitialChannelCount())
         .setPreemptiveRefreshEnabled(externalSettings.isPreemptiveRefreshEnabled())
+        .setLoadBalancingStrategy(LoadBalancingStrategy.ROUND_ROBIN)
         .build();
   }
 
@@ -141,7 +151,8 @@ public abstract class BigtableChannelPoolSettings {
         .setMaxChannelCount(200)
         .setMinRpcsPerChannel(0)
         .setMaxRpcsPerChannel(Integer.MAX_VALUE)
-        .setPreemptiveRefreshEnabled(false);
+        .setPreemptiveRefreshEnabled(false)
+        .setLoadBalancingStrategy(LoadBalancingStrategy.ROUND_ROBIN);
   }
 
   @AutoValue.Builder
@@ -157,6 +168,8 @@ public abstract class BigtableChannelPoolSettings {
     public abstract Builder setInitialChannelCount(int count);
 
     public abstract Builder setPreemptiveRefreshEnabled(boolean enabled);
+
+    public abstract Builder setLoadBalancingStrategy(LoadBalancingStrategy strategy);
 
     abstract BigtableChannelPoolSettings autoBuild();
 

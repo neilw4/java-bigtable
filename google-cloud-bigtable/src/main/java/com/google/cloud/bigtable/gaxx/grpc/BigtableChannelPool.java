@@ -15,21 +15,6 @@
  */
 package com.google.cloud.bigtable.gaxx.grpc;
 
-import com.google.api.core.InternalApi;
-import com.google.api.gax.grpc.ChannelFactory;
-import com.google.api.gax.grpc.ChannelPrimer;
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
-import com.google.common.collect.ImmutableList;
-import io.grpc.CallOptions;
-import io.grpc.Channel;
-import io.grpc.ClientCall;
-import io.grpc.ForwardingClientCall.SimpleForwardingClientCall;
-import io.grpc.ForwardingClientCallListener.SimpleForwardingClientCallListener;
-import io.grpc.ManagedChannel;
-import io.grpc.Metadata;
-import io.grpc.MethodDescriptor;
-import io.grpc.Status;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -42,7 +27,27 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.stream.Stream;
+import java.util.Comparator;
+
 import javax.annotation.Nullable;
+
+import com.google.api.core.InternalApi;
+import com.google.api.gax.grpc.ChannelFactory;
+import com.google.api.gax.grpc.ChannelPrimer;
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableList;
+
+import io.grpc.CallOptions;
+import io.grpc.Channel;
+import io.grpc.ClientCall;
+import io.grpc.ForwardingClientCall.SimpleForwardingClientCall;
+import io.grpc.ForwardingClientCallListener.SimpleForwardingClientCallListener;
+import io.grpc.ManagedChannel;
+import io.grpc.Metadata;
+import io.grpc.MethodDescriptor;
+import io.grpc.Status;
 
 /**
  * A {@link ManagedChannel} that will send requests round-robin via a set of channels.
@@ -140,11 +145,21 @@ public class BigtableChannelPool extends ManagedChannel {
   @Override
   public <ReqT, RespT> ClientCall<ReqT, RespT> newCall(
       MethodDescriptor<ReqT, RespT> methodDescriptor, CallOptions callOptions) {
-    return getChannel(indexTicker.getAndIncrement()).newCall(methodDescriptor, callOptions);
+    return new AffinityChannel(pickEntry()).newCall(methodDescriptor, callOptions);
   }
 
-  Channel getChannel(int affinity) {
-    return new AffinityChannel(affinity);
+  Entry pickEntry() {
+    switch (settings.getLoadBalancingStrategy()) {
+      case ROUND_ROBIN:
+        return getEntry(indexTicker.getAndIncrement());
+      case LEAST_LOADED_OF_TWO:
+        return Stream.of(getEntry(indexTicker.getAndIncrement()), getEntry(indexTicker.get()))
+            .min(Comparator.comparingInt(e -> e.outstandingRpcs.get()))
+            .get();
+      default:
+        throw new IllegalStateException("Unknown load balancing strategy " +
+            settings.getLoadBalancingStrategy());
+    }
   }
 
   /** {@inheritDoc} */
@@ -386,16 +401,23 @@ public class BigtableChannelPool extends ManagedChannel {
   }
 
   /**
-   * Get and retain a Channel Entry. The returned Entry will have its rpc count incremented,
-   * preventing it from getting recycled.
+   * Returns one of the channels managed by this pool. The pool continues to "own" the channel, and
+   * the caller should not shut it down.
+   *
+   * @param affinity Two calls to this method with the same affinity returns the same channel most
+   *     of the time, if the channel pool was refreshed since the last call, a new channel will be
+   *     returned. The reverse is not true: Two calls with different affinities might return the
+   *     same channel. However, the implementation should attempt to spread load evenly.
    */
-  Entry getRetainedEntry(int affinity) {
+  Entry getEntry(int affinity) {
     // The maximum number of concurrent calls to this method for any given time span is at most 2,
     // so the loop can actually be 2 times. But going for 5 times for a safety margin for potential
     // code evolving
     for (int i = 0; i < 5; i++) {
-      Entry entry = getEntry(affinity);
-      if (entry.retain()) {
+      List<Entry> localEntries = entries.get();
+      int index = Math.abs(affinity % localEntries.size());
+      Entry entry =  localEntries.get(index);
+      if (entry.retainable()) {
         return entry;
       }
     }
@@ -406,22 +428,6 @@ public class BigtableChannelPool extends ManagedChannel {
     throw new IllegalStateException("Bug: failed to retain a channel");
   }
 
-  /**
-   * Returns one of the channels managed by this pool. The pool continues to "own" the channel, and
-   * the caller should not shut it down.
-   *
-   * @param affinity Two calls to this method with the same affinity returns the same channel most
-   *     of the time, if the channel pool was refreshed since the last call, a new channel will be
-   *     returned. The reverse is not true: Two calls with different affinities might return the
-   *     same channel. However, the implementation should attempt to spread load evenly.
-   */
-  private Entry getEntry(int affinity) {
-    List<Entry> localEntries = entries.get();
-
-    int index = Math.abs(affinity % localEntries.size());
-
-    return localEntries.get(index);
-  }
 
   /** Bundles a gRPC {@link ManagedChannel} with some usage accounting. */
   static class Entry {
@@ -459,12 +465,24 @@ public class BigtableChannelPool extends ManagedChannel {
     }
 
     /**
-     * Try to increment the outstanding RPC count. The method will return false if the channel is
-     * closing and the caller should pick a different channel. If the method returned true, the
-     * channel has been successfully retained and it is the responsibility of the caller to release
-     * it.
+     * The method will return false if the channel is closing and the caller should pick a different
+     * channel. If the method returned true, the channel is useable and can be retained.
      */
-    private boolean retain() {
+    private boolean retainable() {
+      // abort if the channel is closing
+      if (shutdownRequested.get()) {
+        retain();
+        release();
+        return false;
+      }
+      return true;
+    }
+
+    /**
+     * Try to increment the outstanding RPC count. It is the responsibility of the caller to check
+     * that the channel is retainable, and to release it after RPC completion.
+     */
+    private void retain() {
       // register desire to start RPC
       int currentOutstanding = outstandingRpcs.incrementAndGet();
 
@@ -473,13 +491,6 @@ public class BigtableChannelPool extends ManagedChannel {
       if (currentOutstanding > prevMax) {
         maxOutstanding.incrementAndGet();
       }
-
-      // abort if the channel is closing
-      if (shutdownRequested.get()) {
-        release();
-        return false;
-      }
-      return true;
     }
 
     /**
@@ -520,10 +531,10 @@ public class BigtableChannelPool extends ManagedChannel {
 
   /** Thin wrapper to ensure that new calls are properly reference counted. */
   private class AffinityChannel extends Channel {
-    private final int affinity;
+    private final Entry entry;
 
-    public AffinityChannel(int affinity) {
-      this.affinity = affinity;
+    public AffinityChannel(Entry entry) {
+      this.entry = entry;
     }
 
     @Override
@@ -534,9 +545,7 @@ public class BigtableChannelPool extends ManagedChannel {
     @Override
     public <RequestT, ResponseT> ClientCall<RequestT, ResponseT> newCall(
         MethodDescriptor<RequestT, ResponseT> methodDescriptor, CallOptions callOptions) {
-
-      Entry entry = getRetainedEntry(affinity);
-
+      entry.retain();
       return new ReleasingClientCall<>(entry.channel.newCall(methodDescriptor, callOptions), entry);
     }
   }
