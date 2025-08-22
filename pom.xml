@@ -169,6 +169,11 @@
                 <version>2.65.1-SNAPSHOT</version><!-- {x-version-update:grpc-google-cloud-bigtable-v2:current} -->
             </dependency>
             <dependency>
+                <groupId>com.neilw4</groupId>
+                <artifactId>loadtest</artifactId>
+                <version>2.65.1-SNAPSHOT</version><!-- {x-version-update:grpc-google-cloud-bigtable-v2:current} -->
+            </dependency>
+            <dependency>
                 <groupId>com.google.api.grpc</groupId>
                 <artifactId>grpc-google-cloud-bigtable-admin-v2</artifactId>
                 <version>2.65.1-SNAPSHOT</version><!-- {x-version-update:grpc-google-cloud-bigtable-admin-v2:current} -->
@@ -355,6 +360,7 @@
     </profiles>
 
     <modules>
+    <module>loadtest</module>
     <module>google-cloud-bigtable</module>
     <module>grpc-google-cloud-bigtable-admin-v2</module>
     <module>grpc-google-cloud-bigtable-v2</module>
