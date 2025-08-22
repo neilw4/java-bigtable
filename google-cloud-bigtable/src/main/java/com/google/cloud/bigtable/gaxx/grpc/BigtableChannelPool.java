@@ -151,7 +151,7 @@ public class BigtableChannelPool extends ManagedChannel {
   Entry pickEntry() {
     switch (settings.getLoadBalancingStrategy()) {
       case ROUND_ROBIN:
-        return getEntry(indexTicker.getAndIncrement());
+        // return getEntry(indexTicker.getAndIncrement());
       case LEAST_LOADED_OF_TWO:
         return Stream.of(getEntry(indexTicker.getAndIncrement()), getEntry(indexTicker.get()))
             .min(Comparator.comparingInt(e -> e.outstandingRpcs.get()))

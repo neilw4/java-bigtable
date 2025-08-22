@@ -47,8 +47,8 @@ public class SimpleLoadTest {
   private static final int RUN_DURATION_SECONDS = 15;
   private static final int WARMUM_TIME_S = 3;
   private static final int SECONDS_BETWEEN_TESTS = 5;
-  private static final int[] QPS_TARGETS = {50, 100, 200, 500, 1_000, 2_500, 5_000, 10_000, 25_000, 50_000};
-
+  private static final int[] QPS_TARGETS = { 50, 100, 200, 500, 1_000, 2_500,
+                                            5_000, 10_000, 25_000, 50_000};
 
   private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS: ");
 
@@ -123,14 +123,17 @@ public class SimpleLoadTest {
     double[] latencies = allLatencies.stream().flatMap(List::stream).mapToDouble(Double::doubleValue).sorted().toArray();
     log("Calculating stats");
     double throughput = latencies.length / RUN_DURATION_SECONDS;
-    double meanLatency = (double) Arrays.stream(latencies).average().getAsDouble();
+    if (latencies.length > 0) {
+      double meanLatency = (double) Arrays.stream(latencies).average().getAsDouble();
+      double p50 = latencies[(int) (latencies.length * 0.50)];
+      double p90 = latencies[(int) (latencies.length * 0.90)];
+      double p95 = latencies[(int) (latencies.length * 0.95)];
+      double p99 = latencies[(int) (latencies.length * 0.99)];
 
-    double p50 = latencies[(int) (latencies.length * 0.50)];
-    double p90 = latencies[(int) (latencies.length * 0.90)];
-    double p95 = latencies[(int) (latencies.length * 0.95)];
-    double p99 = latencies[(int) (latencies.length * 0.99)];
-
-    System.out.println(targetQps+","+throughput+","+meanLatency+","+p50+","+p90+","+p95+","+p99);
+      System.out.println(targetQps+","+throughput+","+meanLatency+","+p50+","+p90+","+p95+","+p99);
+    } else {
+      log("no data for run with QPS" + targetQps);
+    }
   }
 
 
@@ -185,10 +188,6 @@ public class SimpleLoadTest {
           long startNs = System.nanoTime();
           ApiFuture<Row> rowFuture = dataClient.readRowAsync(TABLE_ID, "myrow");
 
-          // long endNs = System.nanoTime();
-          // long latencyNs = endNs - startNs;
-          // double latencyMs = latencyNs / 1000.0 / 1000.0;
-
           if (warming) {
             warming = System.currentTimeMillis() <= warmupEndMs;
           }
@@ -212,7 +211,14 @@ public class SimpleLoadTest {
           log("An error occurred in a worker thread: " + e.getMessage());
         }
       }
-      callbackExecutor.shutdown();
+      // We'd like to shut this down, but we get problems because there's a tail of long-running requests
+     // that try to execute the callback on the executor for a long time after shutting it down.
+      // try {
+      //   Thread.sleep(SECONDS_BETWEEN_TESTS);
+      // } catch (InterruptedException e) {
+      //   Thread.currentThread().interrupt();
+      // }
+      // callbackExecutor.shutdown();
     }
   }
 }
