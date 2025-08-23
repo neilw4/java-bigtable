@@ -19,6 +19,8 @@ import com.google.api.core.BetaApi;
 import com.google.api.gax.grpc.ChannelPoolSettings;
 import com.google.auto.value.AutoValue;
 import com.google.common.base.Preconditions;
+import com.google.common.base.Strings;
+
 import java.time.Duration;
 
 /**
@@ -46,6 +48,9 @@ public abstract class BigtableChannelPoolSettings {
 
   /** The maximum number of channels that can be added or removed at a time. */
   static final int MAX_RESIZE_DELTA = 2;
+
+
+  private static final String BIGTABLE_LOAD_BALANCER_ENV_VAR = "BIGTABLE_LOAD_BALANCER";
 
   /** Enum to define the load balancing strategy. */
   public enum LoadBalancingStrategy {
@@ -122,6 +127,22 @@ public abstract class BigtableChannelPoolSettings {
 
   public abstract Builder toBuilder();
 
+  private static LoadBalancingStrategy defaultLoadBalancingStrategy() {
+    String s = System.getenv(BIGTABLE_LOAD_BALANCER_ENV_VAR);
+    if (Strings.isNullOrEmpty(s)) {
+      System.err.println("using default load balancing strategy " + LoadBalancingStrategy.ROUND_ROBIN);
+      return LoadBalancingStrategy.ROUND_ROBIN;
+    }
+    try {
+    LoadBalancingStrategy lbs = LoadBalancingStrategy.valueOf(s.trim().toUpperCase());
+      System.err.println("using load balancing strategy " + lbs);
+    return lbs;
+    } catch (IllegalArgumentException e) {
+      System.err.println("invalid load balancer " + s);
+      return LoadBalancingStrategy.ROUND_ROBIN;
+    }
+  }
+
   public static BigtableChannelPoolSettings copyFrom(ChannelPoolSettings externalSettings) {
     return BigtableChannelPoolSettings.builder()
         .setMinRpcsPerChannel(externalSettings.getMinRpcsPerChannel())
@@ -130,7 +151,7 @@ public abstract class BigtableChannelPoolSettings {
         .setMaxChannelCount(externalSettings.getMaxChannelCount())
         .setInitialChannelCount(externalSettings.getInitialChannelCount())
         .setPreemptiveRefreshEnabled(externalSettings.isPreemptiveRefreshEnabled())
-        .setLoadBalancingStrategy(LoadBalancingStrategy.ROUND_ROBIN)
+        .setLoadBalancingStrategy(defaultLoadBalancingStrategy())
         .build();
   }
 
@@ -152,7 +173,7 @@ public abstract class BigtableChannelPoolSettings {
         .setMinRpcsPerChannel(0)
         .setMaxRpcsPerChannel(Integer.MAX_VALUE)
         .setPreemptiveRefreshEnabled(false)
-        .setLoadBalancingStrategy(LoadBalancingStrategy.ROUND_ROBIN);
+        .setLoadBalancingStrategy(defaultLoadBalancingStrategy());
   }
 
   @AutoValue.Builder

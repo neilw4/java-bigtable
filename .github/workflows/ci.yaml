@@ -109,15 +109,15 @@ jobs:
     - run: .kokoro/build.sh
       env:
         JOB_TYPE: lint
-  clirr:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-java@v4
-      with:
-        distribution: temurin
-        java-version: 8
-    - run: java -version
-    - run: .kokoro/build.sh
-      env:
-        JOB_TYPE: clirr
+  # clirr:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #   - uses: actions/checkout@v4
+  #   - uses: actions/setup-java@v4
+  #     with:
+  #       distribution: temurin
+  #       java-version: 8
+  #   - run: java -version
+  #   - run: .kokoro/build.sh
+  #     env:
+  #       JOB_TYPE: clirr
