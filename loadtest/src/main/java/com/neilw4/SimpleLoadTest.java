@@ -22,6 +22,7 @@ import com.google.cloud.bigtable.data.v2.BigtableDataClient;
 import com.google.cloud.bigtable.data.v2.BigtableDataSettings;
 import com.google.cloud.bigtable.data.v2.models.RowMutation;
 import com.google.cloud.bigtable.data.v2.models.TableId;
+import com.google.common.base.Strings;
 import com.google.cloud.bigtable.data.v2.models.Row;
 import com.google.cloud.bigtable.admin.v2.models.CreateTableRequest;
 
@@ -104,8 +105,11 @@ public class SimpleLoadTest {
   
     String algorithm = System.getenv(BIGTABLE_LOAD_BALANCER_ENV_VAR);
     String directpath = System.getenv(CBT_ENABLE_DIRECTPATH_ENV_VAR);
+    if (Strings.isNullOrEmpty(directpath)) {
+      directpath = "false";
+    }
 
-    System.out.println("ts,algorithm,directpath,target,throughput,mean,p50,p90,p95,p99,errors");
+    System.out.println("ts,algorithm,directpath,target,throughput,mean,p50,p90,p95,p99,p99.5,p99.9,errors");
     for (int i=0; i < RUNS_PER_TARGET_QPS; i++) {
       for (int targetQps : QPS_TARGETS) {
         BigtableDataClient client = createClient();
@@ -150,6 +154,8 @@ public class SimpleLoadTest {
       double p90 = latencies[(int) (latencies.length * 0.90)];
       double p95 = latencies[(int) (latencies.length * 0.95)];
       double p99 = latencies[(int) (latencies.length * 0.99)];
+      double p995 = latencies[(int) (latencies.length * 0.995)];
+      double p999 = latencies[(int) (latencies.length * 0.999)];
 
       System.out.println(
         TIME_FORMATTER.format(LocalDateTime.now())+","
@@ -162,6 +168,8 @@ public class SimpleLoadTest {
         +p90+","
         +p95+","
         +p99+","
+        +p995+","
+        +p999+","
         +errors.get());
     } else {
       log("no data for run with QPS" + targetQps);

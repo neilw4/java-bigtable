@@ -55,7 +55,10 @@ public abstract class BigtableChannelPoolSettings {
   /** Enum to define the load balancing strategy. */
   public enum LoadBalancingStrategy {
     ROUND_ROBIN,
-    LEAST_LOADED_OF_TWO
+    RANDOM,
+    LEAST_LOADED_OF_TWO_RANDOM,
+    LEAST_LOADED_OF_TWO_RR,
+    LEAST_LOADED,
   }
 
   /**

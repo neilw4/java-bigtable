@@ -17,7 +17,9 @@ package com.google.cloud.bigtable.gaxx.grpc;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Random;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -73,6 +75,7 @@ public class BigtableChannelPool extends ManagedChannel {
   private final Object entryWriteLock = new Object();
   @VisibleForTesting final AtomicReference<ImmutableList<Entry>> entries = new AtomicReference<>();
   private final AtomicInteger indexTicker = new AtomicInteger();
+  private final Random random = new Random();
   private final String authority;
 
   public static BigtableChannelPool create(
@@ -151,11 +154,21 @@ public class BigtableChannelPool extends ManagedChannel {
   Entry pickEntry() {
     switch (settings.getLoadBalancingStrategy()) {
       case ROUND_ROBIN:
-        // return getEntry(indexTicker.getAndIncrement());
-      case LEAST_LOADED_OF_TWO:
+        return getEntry(indexTicker.getAndIncrement());
+      case LEAST_LOADED_OF_TWO_RR:
         return Stream.of(getEntry(indexTicker.getAndIncrement()), getEntry(indexTicker.get()))
             .min(Comparator.comparingInt(e -> e.outstandingRpcs.get()))
             .get();
+      case LEAST_LOADED:
+        List<Entry> shuffled = new ArrayList<>(entries.get());
+        Collections.shuffle(shuffled);
+        return shuffled.stream().filter(e -> e.retainable()).min(Comparator.comparingInt(e -> e.outstandingRpcs.get())).get();
+      case LEAST_LOADED_OF_TWO_RANDOM:
+        return Stream.of(getEntry(random.nextInt(entries.get().size())), getEntry(random.nextInt(entries.get().size())))
+            .min(Comparator.comparingInt(e -> e.outstandingRpcs.get()))
+            .get();
+      case RANDOM:
+      return getEntry(random.nextInt(entries.get().size()));
       default:
         throw new IllegalStateException("Unknown load balancing strategy " +
             settings.getLoadBalancingStrategy());
