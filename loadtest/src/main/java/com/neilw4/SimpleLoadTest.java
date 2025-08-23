@@ -60,10 +60,10 @@ public class SimpleLoadTest {
   private static final String BIGTABLE_LOAD_BALANCER_ENV_VAR = "BIGTABLE_LOAD_BALANCER";
   private static final String CBT_ENABLE_DIRECTPATH_ENV_VAR = "CBT_ENABLE_DIRECTPATH";
 
-  private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS: ");
+  private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
 
   public static void log(String l) {
-    System.err.println(TIME_FORMATTER.format(LocalDateTime.now()) + l);
+    System.err.println(TIME_FORMATTER.format(LocalDateTime.now()) + ": " + l);
   }
 
   public static void setUpTable() throws IOException {
@@ -117,7 +117,7 @@ public class SimpleLoadTest {
         client.close();
         TimeUnit.SECONDS.sleep(SECONDS_BETWEEN_TESTS);
       }
-  }
+    }
     log("goodbye");
   }
 
