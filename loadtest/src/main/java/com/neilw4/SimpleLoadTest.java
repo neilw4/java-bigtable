@@ -22,6 +22,7 @@ import com.google.cloud.bigtable.data.v2.BigtableDataClient;
 import com.google.cloud.bigtable.data.v2.BigtableDataSettings;
 import com.google.cloud.bigtable.data.v2.models.RowMutation;
 import com.google.cloud.bigtable.data.v2.models.TableId;
+import com.google.cloud.bigtable.data.v2.stub.EnhancedBigtableStub;
 import com.google.common.base.Strings;
 import com.google.cloud.bigtable.data.v2.models.Row;
 import com.google.cloud.bigtable.admin.v2.models.CreateTableRequest;
@@ -90,6 +91,8 @@ public class SimpleLoadTest {
     BigtableDataSettings settings =
         BigtableDataSettings.newBuilder().setProjectId(PROJECT_ID).setInstanceId(INSTANCE_ID).build();
 
+    EnhancedBigtableStub.createBigtableClientContext(settings.getStubSettings());
+
     BigtableDataClient client = BigtableDataClient.create(settings);
 
     log("populating");
@@ -119,6 +122,7 @@ public class SimpleLoadTest {
       }
     }
     log("goodbye");
+    System.exit(0);
   }
 
   private static void runTest(BigtableDataClient client, int targetQps, @Nullable String algorithm, @Nullable String directpath)
