@@ -26,6 +26,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -40,6 +41,7 @@ import com.google.api.gax.grpc.ChannelPrimer;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
+import com.google.common.util.concurrent.AtomicDouble;
 
 import io.grpc.CallOptions;
 import io.grpc.Channel;
@@ -168,7 +170,21 @@ public class BigtableChannelPool extends ManagedChannel {
             .min(Comparator.comparingInt(e -> e.outstandingRpcs.get()))
             .get();
       case RANDOM:
-      return getEntry(random.nextInt(entries.get().size()));
+        return getEntry(random.nextInt(entries.get().size()));
+      case PEAK_EWMA_OF_TWO_RANDOM:
+        return Stream.of(getEntry(random.nextInt(entries.get().size())), getEntry(random.nextInt(entries.get().size())))
+            .min(Comparator.comparingDouble(e ->
+                e.expectedLatency.get() == 0 && e.outstandingRpcs.get() > 0
+                    ? 5 * 60 * 1000 * 1000 * 1000 * 1000 + e.outstandingRpcs.get()
+                    : e.expectedLatency.get() * (e.outstandingRpcs.get() + 1) ))
+            .get();
+      case PEAK_EWMA_OF_TWO_RR:
+        return Stream.of(getEntry(indexTicker.getAndIncrement()), getEntry(indexTicker.get()))
+            .min(Comparator.comparingDouble(e ->
+                e.expectedLatency.get() == 0 && e.outstandingRpcs.get() > 0
+                    ? 5 * 60 * 1000 * 1000 * 1000 * 1000 + e.outstandingRpcs.get()
+                    : e.expectedLatency.get() * (e.outstandingRpcs.get() + 1) ))
+            .get();
       default:
         throw new IllegalStateException("Unknown load balancing strategy " +
             settings.getLoadBalancingStrategy());
@@ -469,6 +485,9 @@ public class BigtableChannelPool extends ManagedChannel {
     // Flag that the channel has been closed.
     private final AtomicBoolean shutdownInitiated = new AtomicBoolean();
 
+    private final AtomicLong lastUpdate = new AtomicLong(0);
+    private final AtomicDouble expectedLatency = new AtomicDouble(0.0);
+
     private Entry(ManagedChannel channel) {
       this.channel = channel;
     }
@@ -485,7 +504,7 @@ public class BigtableChannelPool extends ManagedChannel {
       // abort if the channel is closing
       if (shutdownRequested.get()) {
         retain();
-        release();
+        release(null);
         return false;
       }
       return true;
@@ -510,11 +529,25 @@ public class BigtableChannelPool extends ManagedChannel {
      * Notify the channel that the number of outstanding RPCs has decreased. If shutdown has been
      * previously requested, this method will shutdown the channel if its the last outstanding RPC.
      */
-    private void release() {
+    private void release(@Nullable Long latency) {
       int newCount = outstandingRpcs.decrementAndGet();
       if (newCount < 0) {
         LOG.log(Level.WARNING, "Bug! Reference count is negative (" + newCount + ")!");
       }
+
+      long now = System.nanoTime();
+      if (latency != null && lastUpdate.get() > 0) {
+        long elapsedTime = now - lastUpdate.get();
+        // 5s
+        long halfLife = 5 * 1000 * 1000 * 1000;
+        double weight = Math.exp(-elapsedTime / (double)halfLife);
+        if (latency > expectedLatency.get()) {
+          expectedLatency.set(latency);
+        } else {
+          expectedLatency.updateAndGet(previousExpectedLatency -> previousExpectedLatency * weight + latency * (1-weight));
+        }
+      }
+      lastUpdate.set(now);
 
       // Must check outstandingRpcs after shutdownRequested (in reverse order of retain()) to ensure
       // mutual exclusion.
@@ -569,6 +602,7 @@ public class BigtableChannelPool extends ManagedChannel {
     final Entry entry;
     private final AtomicBoolean wasClosed = new AtomicBoolean();
     private final AtomicBoolean wasReleased = new AtomicBoolean();
+    @Nullable private Long startTimeNanos;
 
     public ReleasingClientCall(ClientCall<ReqT, RespT> delegate, Entry entry) {
       super(delegate);
@@ -577,6 +611,7 @@ public class BigtableChannelPool extends ManagedChannel {
 
     @Override
     public void start(Listener<RespT> responseListener, Metadata headers) {
+      startTimeNanos = System.nanoTime();
       if (cancellationException != null) {
         throw new IllegalStateException("Call is already cancelled", cancellationException);
       }
@@ -596,7 +631,11 @@ public class BigtableChannelPool extends ManagedChannel {
                   super.onClose(status, trailers);
                 } finally {
                   if (wasReleased.compareAndSet(false, true)) {
-                    entry.release();
+                    Long latency = null;
+                    if (startTimeNanos != null) {
+                      latency = System.nanoTime() - startTimeNanos;
+                    }
+                    entry.release(latency);
                   } else {
                     LOG.log(
                         Level.WARNING,
@@ -610,7 +649,11 @@ public class BigtableChannelPool extends ManagedChannel {
       } catch (Exception e) {
         // In case start failed, make sure to release
         if (wasReleased.compareAndSet(false, true)) {
-          entry.release();
+          Long latency = null;
+          if (startTimeNanos != null) {
+            latency = System.nanoTime() - startTimeNanos;
+          }
+          entry.release(latency);
         } else {
           LOG.log(
               Level.WARNING,

@@ -59,6 +59,8 @@ public abstract class BigtableChannelPoolSettings {
     LEAST_LOADED_OF_TWO_RANDOM,
     LEAST_LOADED_OF_TWO_RR,
     LEAST_LOADED,
+    PEAK_EWMA_OF_TWO_RR,
+    PEAK_EWMA_OF_TWO_RANDOM,
   }
 
   /**
