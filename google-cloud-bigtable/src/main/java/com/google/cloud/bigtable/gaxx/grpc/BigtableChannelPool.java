@@ -175,14 +175,14 @@ public class BigtableChannelPool extends ManagedChannel {
         return Stream.of(getEntry(random.nextInt(entries.get().size())), getEntry(random.nextInt(entries.get().size())))
             .min(Comparator.comparingDouble(e ->
                 e.expectedLatency.get() == 0 && e.outstandingRpcs.get() > 0
-                    ? 5 * 60 * 1000 * 1000 * 1000 * 1000 + e.outstandingRpcs.get()
+                    ? 5L * 60 * 1000 * 1000 * 1000 * 1000 + e.outstandingRpcs.get()
                     : e.expectedLatency.get() * (e.outstandingRpcs.get() + 1) ))
             .get();
       case PEAK_EWMA_OF_TWO_RR:
         return Stream.of(getEntry(indexTicker.getAndIncrement()), getEntry(indexTicker.get()))
             .min(Comparator.comparingDouble(e ->
                 e.expectedLatency.get() == 0 && e.outstandingRpcs.get() > 0
-                    ? 5 * 60 * 1000 * 1000 * 1000 * 1000 + e.outstandingRpcs.get()
+                    ? 5L * 60 * 1000 * 1000 * 1000 * 1000 + e.outstandingRpcs.get()
                     : e.expectedLatency.get() * (e.outstandingRpcs.get() + 1) ))
             .get();
       default:
@@ -539,7 +539,7 @@ public class BigtableChannelPool extends ManagedChannel {
       if (latency != null && lastUpdate.get() > 0) {
         long elapsedTime = now - lastUpdate.get();
         // 5s
-        long halfLife = 5 * 1000 * 1000 * 1000;
+        long halfLife = 5L * 1000 * 1000 * 1000;
         double weight = Math.exp(-elapsedTime / (double)halfLife);
         if (latency > expectedLatency.get()) {
           expectedLatency.set(latency);
