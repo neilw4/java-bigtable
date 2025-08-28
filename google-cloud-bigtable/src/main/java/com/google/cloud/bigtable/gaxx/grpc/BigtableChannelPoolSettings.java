@@ -135,15 +135,12 @@ public abstract class BigtableChannelPoolSettings {
   private static LoadBalancingStrategy defaultLoadBalancingStrategy() {
     String s = System.getenv(BIGTABLE_LOAD_BALANCER_ENV_VAR);
     if (Strings.isNullOrEmpty(s)) {
-      System.err.println("using default load balancing strategy " + LoadBalancingStrategy.ROUND_ROBIN);
       return LoadBalancingStrategy.ROUND_ROBIN;
     }
     try {
     LoadBalancingStrategy lbs = LoadBalancingStrategy.valueOf(s.trim().toUpperCase());
-      System.err.println("using load balancing strategy " + lbs);
     return lbs;
     } catch (IllegalArgumentException e) {
-      System.err.println("invalid load balancer " + s);
       return LoadBalancingStrategy.ROUND_ROBIN;
     }
   }

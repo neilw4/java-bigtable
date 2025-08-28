@@ -40,6 +40,7 @@ import com.google.api.gax.grpc.ChannelFactory;
 import com.google.api.gax.grpc.ChannelPrimer;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
+import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
 import com.google.common.util.concurrent.AtomicDouble;
 
@@ -133,6 +134,13 @@ public class BigtableChannelPool extends ManagedChannel {
           REFRESH_PERIOD.getSeconds(),
           TimeUnit.SECONDS);
     }
+
+
+      executor.scheduleAtFixedRate(
+          this::setDelays,
+          10,
+          10,
+          TimeUnit.SECONDS);
   }
 
   /** {@inheritDoc} */
@@ -429,6 +437,25 @@ public class BigtableChannelPool extends ManagedChannel {
     }
   }
 
+  private void setDelays() {
+    String delayStr = System.getenv("CBT_CHANNEL_DELAY_MS");
+    String delayChanceStr = System.getenv("CBT_CHANNEL_DELAY_CHANCE");
+    if (Strings.isNullOrEmpty(delayStr) || Strings.isNullOrEmpty(delayChanceStr)) {
+      return;
+    }
+    int maxDelay = Integer.parseInt(delayStr);
+    int delayChance = Integer.parseInt(delayChanceStr);
+    if (maxDelay <= 0 || delayChance <= 0) {
+      return;
+    }
+    Random r = new Random();
+    List<Entry> localEntries = entries.get();
+    for (int i = 0; i < localEntries.size(); i++) {
+      int delay = r.nextInt(delayChance) > 1 ? 0 : 100 + r.nextInt(maxDelay);
+      localEntries.get(i).delayMs.set(delay);
+    }    
+  }
+
   /**
    * Returns one of the channels managed by this pool. The pool continues to "own" the channel, and
    * the caller should not shut it down.
@@ -487,6 +514,9 @@ public class BigtableChannelPool extends ManagedChannel {
 
     private final AtomicLong lastUpdate = new AtomicLong(0);
     private final AtomicDouble expectedLatency = new AtomicDouble(0.0);
+
+    private final ScheduledExecutorService executor = Executors.newScheduledThreadPool(5);
+    public AtomicInteger delayMs = new AtomicInteger(0);
 
     private Entry(ManagedChannel channel) {
       this.channel = channel;
@@ -620,6 +650,23 @@ public class BigtableChannelPool extends ManagedChannel {
             new SimpleForwardingClientCallListener<RespT>(responseListener) {
               @Override
               public void onClose(Status status, Metadata trailers) {
+                if (entry.delayMs.get() == 0) {
+                  doClose(status, trailers);
+                } else {
+                  entry.executor.schedule(() -> doClose(status, trailers), entry.delayMs.get(), TimeUnit.MILLISECONDS);
+                }
+              }
+
+              @Override
+              public void onMessage(RespT message) {
+                if (entry.delayMs.get() == 0) {
+                  super.onMessage(message);
+                } else {
+                  entry.executor.schedule(() -> super.onMessage(message), entry.delayMs.get(), TimeUnit.MILLISECONDS);
+                }
+              }
+
+              public void doClose(Status status, Metadata trailers) {
                 if (!wasClosed.compareAndSet(false, true)) {
                   LOG.log(
                       Level.WARNING,

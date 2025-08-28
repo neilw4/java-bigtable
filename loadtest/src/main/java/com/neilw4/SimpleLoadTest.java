@@ -49,14 +49,10 @@ public class SimpleLoadTest {
   private static final String TABLE_NAME = "neilwells-test-table";
   private static final TableId TABLE_ID = TableId.of(TABLE_NAME);
 
-  private static final int RUNS_PER_TARGET_QPS = 1;
   private static final int NUM_THREADS = 50;
-  private static final int MIN_RUN_DURATION_SECONDS = 150;
-  private static final int MIN_REQUESTS = 100_000;
+  private static final int MIN_RUN_DURATION_SECONDS = 40;
+  private static final int MIN_REQUESTS = 10_000;
   private static final int WARMUM_TIME_S = 5;
-  private static final int SECONDS_BETWEEN_TESTS = 5;
-  private static final int[] QPS_TARGETS = { 50, 100, 150, 200, 500, 1_000, 2_500,
-                                            5_000, 10_000};//, 25_000, 50_000};
 
 
   private static final String BIGTABLE_LOAD_BALANCER_ENV_VAR = "BIGTABLE_LOAD_BALANCER";
@@ -113,16 +109,13 @@ public class SimpleLoadTest {
       directpath = "false";
     }
 
-    System.out.println("ts,algorithm,directpath,run_duration_s,threads,target_qps,throughput,mean,p50,p90,p95,p99,p99.5,p99.9,errors");
-    for (int i=0; i < RUNS_PER_TARGET_QPS; i++) {
-      for (int targetQps : QPS_TARGETS) {
-        int runDurationS = Math.max(MIN_REQUESTS / targetQps, MIN_RUN_DURATION_SECONDS);
-        BigtableDataClient client = createClient();
-        runTest(client, targetQps, algorithm, directpath, runDurationS);
-        client.close();
-        TimeUnit.SECONDS.sleep(SECONDS_BETWEEN_TESTS);
-      }
-    }
+    String targetQpsString = System.getenv("CBT_TARGET_QPS");
+    int targetQps = Integer.parseInt(targetQpsString);
+
+    System.out.println("ts,algorithm,directpath,run_duration_s,threads,target_qps,throughput,mean,p50,p90,p95,p99,errors");
+    int runDurationS = Math.max(MIN_REQUESTS / targetQps, MIN_RUN_DURATION_SECONDS);
+    BigtableDataClient client = createClient();
+    runTest(client, targetQps, algorithm, directpath, runDurationS);
     log("goodbye");
     System.exit(0);
   }
@@ -136,7 +129,7 @@ public class SimpleLoadTest {
     final AtomicBoolean isRunning = new AtomicBoolean(true);
     int qpsPerThread = targetQps / NUM_THREADS;
 
-    log("starting run with QPS " + targetQps + " for " + runDurationS/60 + "m");
+    log("starting run with QPS " + targetQps + " for " + runDurationS + "s");
     for (int i = 0; i < NUM_THREADS; i++) {
       List<Double> latencies = new ArrayList<>(targetQps * (runDurationS + 5));
       allLatencies.add(latencies);
@@ -146,13 +139,8 @@ public class SimpleLoadTest {
 
     TimeUnit.SECONDS.sleep(WARMUM_TIME_S + runDurationS);
     isRunning.set(false);
-    log("Finished run");
-    executor.shutdown();
-    log("Shut down run");
 
-    log("combining latencies");
     double[] latencies = allLatencies.stream().flatMap(List::stream).mapToDouble(Double::doubleValue).sorted().toArray();
-    log("Calculating stats");
     double throughput = latencies.length / runDurationS;
     if (latencies.length > 0) {
       double meanLatency = (double) Arrays.stream(latencies).average().getAsDouble();
@@ -160,8 +148,6 @@ public class SimpleLoadTest {
       double p90 = latencies[(int) (latencies.length * 0.90)];
       double p95 = latencies[(int) (latencies.length * 0.95)];
       double p99 = latencies[(int) (latencies.length * 0.99)];
-      double p995 = latencies[(int) (latencies.length * 0.995)];
-      double p999 = latencies[(int) (latencies.length * 0.999)];
 
       System.out.println(
         TIME_FORMATTER.format(LocalDateTime.now())+","
@@ -176,8 +162,6 @@ public class SimpleLoadTest {
         +p90+","
         +p95+","
         +p99+","
-        +p995+","
-        +p999+","
         +errors.get());
     } else {
       log("no data for run with QPS" + targetQps);
